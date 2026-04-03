@@ -1,5 +1,7 @@
 import json
 from models.instruction import Instruction
+class ParseError(Exception):
+    pass
 
 VALID_INSTRUCTIONS = ["FROM", "COPY", "RUN", "WORKDIR", "ENV", "CMD"]
 
@@ -26,41 +28,42 @@ def parse_file(path):
 
         args = parts[1] if len(parts) > 1 else ""
 
-        instruction = validate_instruction(keyword, args, i)
+        instruction = validate_instruction(keyword, args, i, line)
         instructions.append(instruction)
 
     return instructions
-def validate_instruction(keyword, args, line):
+def validate_instruction(keyword, args, line, raw):
 
     if keyword == "FROM":
         if not args:
             raise Exception(f"line {line}: FROM requires image")
-        return Instruction("FROM", args, line)
+        return Instruction("FROM", {"image": args}, line, raw)
 
 
     elif keyword == "COPY":
         parts = args.split()
         if len(parts) != 2:
             raise Exception(f"line {line}: COPY requires src and dest")
-        return Instruction("COPY", parts, line)
+        return Instruction("COPY", {"src": parts[0], "dest": parts[1]}, line, raw)
 
 
     elif keyword == "RUN":
         if not args:
             raise Exception(f"line {line}: RUN requires command")
-        return Instruction("RUN", args, line)
+        return Instruction("RUN", {"command": args}, line, raw)
 
 
     elif keyword == "WORKDIR":
         if not args:
             raise Exception(f"line {line}: WORKDIR requires path")
-        return Instruction("WORKDIR", args, line)
+        return Instruction("WORKDIR", {"path": args}, line, raw)
 
 
     elif keyword == "ENV":
         if "=" not in args:
             raise Exception(f"line {line}: ENV must be key=value")
-        return Instruction("ENV", args, line)
+        key, value = args.split("=", 1)
+        return Instruction("ENV", {"key": key, "value": value}, line, raw)
 
 
     elif keyword == "CMD":
@@ -78,4 +81,4 @@ def validate_instruction(keyword, args, line):
         except:
             raise Exception(f"line {line}: CMD must be JSON array of strings")
 
-        return Instruction("CMD", parsed, line)
+        return Instruction("CMD", {"command": parsed}, line, raw)
