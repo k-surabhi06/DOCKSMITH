@@ -1,0 +1,6 @@
+FROM ubuntu:latest
+WORKDIR /app
+ENV MODE=dev
+COPY . /app
+RUN echo hello
+CMD ["python","app.py"]

@@ -1,0 +1,3 @@
+.docksmith/
+__pycache__/
+*.pyc
