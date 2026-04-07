@@ -1,7 +1,10 @@
 from parser.parser import parse_file
-from store.image_store import list_images, remove_image
+from store.image_store import list_images, remove_image, save_image
+from layer_builder import build_layers
+
+
 def handle_command(command, args):
-    
+
     if command == "build":
         handle_build(args)
 
@@ -16,7 +19,7 @@ def handle_command(command, args):
 
     else:
         print(f"Unknown command: {command}")
-from parser.parser import parse_file
+
 
 def handle_build(args):
 
@@ -32,9 +35,23 @@ def handle_build(args):
     try:
         instructions = parse_file(file_path)
 
-        print("Build successful. Parsed Instructions:")
-        for inst in instructions:
-            print(inst)
+        
+        layers = build_layers(instructions)   # Person 2 will implement
+
+        # create dummy manifest (temporary)
+        name, tag = name_tag.split(":")
+
+        manifest = {
+            "name": name,
+            "tag": tag,
+            "digest": "temp123456789",
+            "layers": layers,
+            "created": "2026-04-03"
+        }
+
+        save_image(manifest)
+
+        print("Build successful")
 
     except Exception as e:
         print(f"Error: {e}")
