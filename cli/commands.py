@@ -1,82 +1,47 @@
-from datetime import datetime
-
-from parser.parser import parse_file
-from store.image_store import list_images, remove_image, save_image
-from layer_builder import build_layers
-from utils.errors import ParseError, ValidationError, ImageNotFound
+from docksmith_parser import parse_file
+from layer_engine.builder import build_image, run_image
+from store.image_store import list_images, remove_image
+from utils.errors import ImageNotFound, ParseError, ValidationError
 
 
 def handle_command(command, args):
-
     if command == "build":
         handle_build(args)
-
     elif command == "images":
         handle_images()
-
     elif command == "rmi":
         handle_rmi(args)
-
     elif command == "run":
-        print("Run not implemented yet")
-
+        handle_run(args)
     else:
         print(f"Unknown command: {command}")
 
 
 def handle_build(args):
+    no_cache = False
+    filtered_args: list[str] = []
+    for arg in args:
+        if arg == "--no-cache":
+            no_cache = True
+        else:
+            filtered_args.append(arg)
 
-    if len(args) < 3 or args[0] != "-t":
-        print("Error: Usage → docksmith build -t <name:tag> <context>")
+    if len(filtered_args) < 3 or filtered_args[0] != "-t":
+        print("Error: Usage -> docksmith build [--no-cache] -t <name:tag> <context>")
         return
 
-    name_tag = args[1]
-    context = args[2]
-
+    name_tag = filtered_args[1]
+    context = filtered_args[2]
     file_path = f"{context}/Docksmithfile"
 
     try:
         instructions = parse_file(file_path)
-
-        # assemble config from parsed instructions
-        env_list = []
-        cmd = None
-        workdir = None
-        for ins in instructions:
-            if ins.type == "ENV":
-                k = ins.args.get("key")
-                v = ins.args.get("value")
-                if k is not None and v is not None:
-                    env_list.append(f"{k}={v}")
-            elif ins.type == "CMD":
-                cmd = ins.args.get("command")
-            elif ins.type == "WORKDIR":
-                workdir = ins.args.get("path")
-
-        # call build_layers with context so Person 2 has required info
-        layers = build_layers(instructions, context)   # Person 2 will implement
-
-        # create manifest using canonical fields; save_image will compute digest
-        name, tag = name_tag.split(":")
-
-        manifest = {
-            "name": name,
-            "tag": tag,
-            "created": datetime.utcnow().isoformat() + "Z",
-            "config": {
-                "Env": env_list,
-                "Cmd": cmd,
-                "WorkingDir": workdir,
-            },
-            "layers": layers,
-            # 'digest' will be computed by save_image/write_manifest
-            "digest": "",
-        }
-
-        digest = save_image(manifest)
-
-        print(f"Build successful: {digest}")
-
+        result = build_image(name_tag, instructions, context, no_cache=no_cache)
+        for step in result["steps"]:
+            print(step)
+        print(
+            f"Successfully built {result['digest']} {name_tag} ({result['total_duration']:.2f}s)"
+        )
     except ParseError as e:
         print(f"Parse error: {e}")
     except ValidationError as e:
@@ -102,5 +67,49 @@ def handle_rmi(args):
         print(f"Error: {e}")
     except ValidationError as e:
         print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+def handle_run(args):
+    if not args:
+        print("Error: Usage -> docksmith run [-e KEY=VALUE] <name:tag> [cmd ...]")
+        return
+
+    env_overrides: dict[str, str] = {}
+    image_ref = None
+    command_override: list[str] | None = None
+    index = 0
+
+    while index < len(args):
+        token = args[index]
+        if token == "-e":
+            if index + 1 >= len(args) or "=" not in args[index + 1]:
+                print("Error: -e requires KEY=VALUE")
+                return
+            key, value = args[index + 1].split("=", 1)
+            env_overrides[key] = value
+            index += 2
+            continue
+
+        image_ref = token
+        command_override = args[index + 1 :] or None
+        break
+
+    if image_ref is None:
+        print("Error: Usage -> docksmith run [-e KEY=VALUE] <name:tag> [cmd ...]")
+        return
+
+    try:
+        exit_code = run_image(
+            image_ref,
+            command_override=command_override,
+            env_overrides=env_overrides,
+        )
+        print(f"Container exited with code {exit_code}")
+    except ImageNotFound as e:
+        print(f"Image error: {e}")
+    except ValidationError as e:
+        print(f"Validation error: {e}")
     except Exception as e:
         print(f"Error: {e}")

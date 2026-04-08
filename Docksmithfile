@@ -3,4 +3,4 @@ WORKDIR /app
 ENV MODE=dev
 COPY . /app
 RUN echo hello
-CMD ["python","app.py"]
+CMD ["/bin/sh","-c","echo container-ok"]

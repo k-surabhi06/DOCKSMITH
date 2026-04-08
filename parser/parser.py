@@ -8,7 +8,7 @@ def parse_file(path):
     instructions = []
 
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             lines = f.readlines()
     except Exception:
         raise ParseError("Docksmithfile not found")
