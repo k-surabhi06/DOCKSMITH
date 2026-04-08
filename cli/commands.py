@@ -1,6 +1,9 @@
+from datetime import datetime
+
 from parser.parser import parse_file
 from store.image_store import list_images, remove_image, save_image
 from layer_builder import build_layers
+from utils.errors import ParseError, ValidationError, ImageNotFound
 
 
 def handle_command(command, args):
@@ -35,31 +38,69 @@ def handle_build(args):
     try:
         instructions = parse_file(file_path)
 
-        
-        layers = build_layers(instructions)   # Person 2 will implement
+        # assemble config from parsed instructions
+        env_list = []
+        cmd = None
+        workdir = None
+        for ins in instructions:
+            if ins.type == "ENV":
+                k = ins.args.get("key")
+                v = ins.args.get("value")
+                if k is not None and v is not None:
+                    env_list.append(f"{k}={v}")
+            elif ins.type == "CMD":
+                cmd = ins.args.get("command")
+            elif ins.type == "WORKDIR":
+                workdir = ins.args.get("path")
 
-        # create dummy manifest (temporary)
+        # call build_layers with context so Person 2 has required info
+        layers = build_layers(instructions, context)   # Person 2 will implement
+
+        # create manifest using canonical fields; save_image will compute digest
         name, tag = name_tag.split(":")
 
         manifest = {
             "name": name,
             "tag": tag,
-            "digest": "temp123456789",
+            "created": datetime.utcnow().isoformat() + "Z",
+            "config": {
+                "Env": env_list,
+                "Cmd": cmd,
+                "WorkingDir": workdir,
+            },
             "layers": layers,
-            "created": "2026-04-03"
+            # 'digest' will be computed by save_image/write_manifest
+            "digest": "",
         }
 
-        save_image(manifest)
+        digest = save_image(manifest)
 
-        print("Build successful")
+        print(f"Build successful: {digest}")
 
+    except ParseError as e:
+        print(f"Parse error: {e}")
+    except ValidationError as e:
+        print(f"Validation error: {e}")
+    except ImageNotFound as e:
+        print(f"Image error: {e}")
     except Exception as e:
         print(f"Error: {e}")
 
 
 def handle_images():
-    list_images()
+    try:
+        list_images()
+    except Exception as e:
+        print(f"Error listing images: {e}")
 
 
 def handle_rmi(args):
-    remove_image(args)
+    try:
+        remove_image(args)
+        print("Image removed")
+    except ImageNotFound as e:
+        print(f"Error: {e}")
+    except ValidationError as e:
+        print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error: {e}")

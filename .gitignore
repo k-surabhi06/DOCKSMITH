@@ -1,3 +1,21 @@
-.docksmith/
+# Python cache
 __pycache__/
 *.pyc
+
+# Virtual environment
+venv/
+.env/
+
+# System files
+.DS_Store
+
+# Tool-specific
+.docksmith/
+
+# Optional: generated files
+*.log
+*.tmp
+
+# PDFs (only if generated)
+*.pdf
+*.md
