@@ -42,7 +42,10 @@ def extract_layer(layer_path: Path, target_dir: Path) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(layer_path, mode="r") as tar:
-            tar.extractall(path=target_dir, filter="data")
+            try:
+                tar.extractall(path=target_dir, filter="data")
+            except TypeError:
+                tar.extractall(path=target_dir)
 
     except (tarfile.TarError, OSError) as e:
         raise ValidationError(f"Failed to extract layer {layer_path}: {e}")

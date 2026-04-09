@@ -16,16 +16,12 @@ import time
 
 
 def handle_command(command, args):
-
     if command == "build":
         handle_build(args)
-
     elif command == "images":
         handle_images()
-
     elif command == "rmi":
         handle_rmi(args)
-
     elif command == "run":
         handle_run(args)
 
@@ -48,9 +44,8 @@ def handle_build(args):
         print("Error: Usage → docksmith build -t <name:tag> <context> [--no-cache]")
         return
 
-    name_tag = args[1]
-    context = args[2]
-
+    name_tag = filtered_args[1]
+    context = filtered_args[2]
     file_path = f"{context}/Docksmithfile"
 
     try:

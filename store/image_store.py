@@ -1,121 +1,151 @@
-import os
-import json
-import hashlib
+from __future__ import annotations
+
 import copy
-from typing import Dict, Any
+import hashlib
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict
 
 from utils.errors import ImageNotFound, ValidationError
 
-BASE_PATH = os.path.expanduser("~/.docksmith")
-IMAGES_PATH = os.path.join(BASE_PATH, "images")
-LAYERS_PATH = os.path.join(BASE_PATH, "layers")
-CACHE_PATH = os.path.join(BASE_PATH, "cache")
+BASE_PATH = Path(os.environ.get("DOCKSMITH_HOME", os.path.expanduser("~/.docksmith")))
+IMAGES_PATH = BASE_PATH / "images"
+LAYERS_PATH = BASE_PATH / "layers"
+CACHE_PATH = BASE_PATH / "cache"
 
 
-def init_dirs():
-    os.makedirs(IMAGES_PATH, exist_ok=True)
-    os.makedirs(LAYERS_PATH, exist_ok=True)
-    os.makedirs(CACHE_PATH, exist_ok=True)
+def init_dirs() -> None:
+    IMAGES_PATH.mkdir(parents=True, exist_ok=True)
+    LAYERS_PATH.mkdir(parents=True, exist_ok=True)
+    CACHE_PATH.mkdir(parents=True, exist_ok=True)
+
+
+def parse_name_tag(name_tag: str) -> tuple[str, str]:
+    if ":" not in name_tag:
+        raise ValidationError("Image reference must be in <name:tag> format")
+
+    name, tag = name_tag.split(":", 1)
+    if not name or not tag:
+        raise ValidationError("Image reference must be in <name:tag> format")
+
+    return name, tag
+
+
+def manifest_path(name_tag: str) -> Path:
+    name, tag = parse_name_tag(name_tag)
+    return IMAGES_PATH / f"{name}_{tag}.json"
+
+
+def layer_path_for_digest(digest: str) -> Path:
+    if not digest.startswith("sha256:"):
+        raise ValidationError(f"Invalid layer digest: {digest}")
+    return LAYERS_PATH / f"{digest.split(':', 1)[1]}.tar"
+
+
+def cache_path_for_key(cache_key: str) -> Path:
+    return CACHE_PATH / f"{cache_key}.json"
 
 
 def compute_digest(data: bytes) -> str:
-    """Return sha256 digest as 'sha256:<hex>' for given bytes."""
     h = hashlib.sha256()
     h.update(data)
     return f"sha256:{h.hexdigest()}"
 
 
 def canonicalize_manifest(manifest: Dict[str, Any]) -> bytes:
-    """Return canonical JSON bytes for manifest (sorted keys, no extra whitespace).
-
-    This function ensures manifest canonicalization for deterministic digest
-    computation. The caller should set `manifest['digest'] = ''` prior to
-    canonicalization when computing the manifest digest.
-    """
-    # Use a deep copy to avoid mutating caller's manifest
     m = copy.deepcopy(manifest)
-    # Ensure digest field exists and is empty for hashing step
-    m['digest'] = m.get('digest', '')
-    canonical = json.dumps(m, sort_keys=True, separators=(',', ':')).encode('utf-8')
-    return canonical
+    m["digest"] = m.get("digest", "")
+    return json.dumps(m, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def write_manifest(manifest: Dict[str, Any]) -> str:
-    """Compute manifest digest, update manifest['digest'], save to IMAGES_PATH and return digest."""
     init_dirs()
 
-    # Compute canonical bytes with empty digest per spec
     temp = copy.deepcopy(manifest)
-    temp['digest'] = ''
+    temp["digest"] = ""
     canonical = canonicalize_manifest(temp)
     digest = compute_digest(canonical)
 
-    # Update manifest with final digest and persist
-    manifest['digest'] = digest
-
-    file_name = f"{manifest['name']}:{manifest['tag']}".replace(":", "_") + ".json"
-    path = os.path.join(IMAGES_PATH, file_name)
-
-    with open(path, 'w') as f:
+    manifest["digest"] = digest
+    path = manifest_path(f"{manifest['name']}:{manifest['tag']}")
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
     return digest
-def list_images():
-    init_dirs()
 
-    files = os.listdir(IMAGES_PATH)
+
+def load_image(name_tag: str) -> Dict[str, Any]:
+    init_dirs()
+    path = manifest_path(name_tag)
+    if not path.exists():
+        raise ImageNotFound(f"Image not found: {name_tag}")
+
+    with open(path, encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
+def save_image(manifest: Dict[str, Any]) -> str:
+    return write_manifest(manifest)
+
+
+def list_images() -> None:
+    init_dirs()
+    files = sorted(IMAGES_PATH.glob("*.json"))
 
     if not files:
         print("No images found")
         return
 
-    for file in files:
-        path = os.path.join(IMAGES_PATH, file)
-
-        with open(path) as f:
+    print(f"{'NAME':<18} {'TAG':<12} {'ID':<12} CREATED")
+    for path in files:
+        with open(path, encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        name = data.get("name")
-        tag = data.get("tag")
-        digest = data.get("digest", "")[:12]
-        created = data.get("created")
+        name = data.get("name", "")
+        tag = data.get("tag", "")
+        digest = data.get("digest", "").replace("sha256:", "")[:12]
+        created = data.get("created", "")
+        print(f"{name:<18} {tag:<12} {digest:<12} {created}")
 
-        print(f"{name:<10} {tag:<10} {digest:<12} {created}")
-def remove_image(args):
+
+def remove_image(name_tag_or_args) -> None:
     init_dirs()
-    if not args:
-        raise ValidationError("Usage: docksmith rmi <name:tag>")
 
-    name_tag = args[0]
+    if isinstance(name_tag_or_args, list):
+        if not name_tag_or_args:
+            raise ValidationError("Usage: docksmith rmi <name:tag>")
+        name_tag = name_tag_or_args[0]
+    else:
+        name_tag = name_tag_or_args
 
-    file_name = name_tag.replace(":", "_") + ".json"
-    path = os.path.join(IMAGES_PATH, file_name)
+    manifest = load_image(name_tag)
 
-    if not os.path.exists(path):
-        raise ImageNotFound(f"Image not found: {name_tag}")
+    for layer in manifest.get("layers", []):
+        digest = layer.get("digest")
+        if not digest:
+            continue
+        path = layer_path_for_digest(digest)
+        if path.exists():
+            path.unlink()
 
-    with open(path) as f:
-        data = json.load(f)
+    path = manifest_path(name_tag)
+    if path.exists():
+        path.unlink()
 
-    # delete layers
-    for layer in data.get("layers", []):
-        layer_path = os.path.join(LAYERS_PATH, layer.get("digest", ""))
-        if os.path.exists(layer_path):
-            os.remove(layer_path)
 
-    os.remove(path)
-def load_image(name_tag):
-    file_name = name_tag.replace(":", "_") + ".json"
-    path = os.path.join(IMAGES_PATH, file_name)
-    if not os.path.exists(path):
-        raise ImageNotFound(f"Image not found: {name_tag}")
+def load_cache_entry(cache_key: str) -> Dict[str, Any] | None:
+    init_dirs()
+    path = cache_path_for_key(cache_key)
+    if not path.exists():
+        return None
 
-    with open(path) as f:
+    with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
-def save_image(manifest: Dict[str, Any]) -> str:
-    """Persist manifest using canonicalization and digest rules.
 
-    Returns the computed manifest digest.
-    """
-    digest = write_manifest(manifest)
-    return digest
+
+def save_cache_entry(cache_key: str, digest: str) -> None:
+    init_dirs()
+    path = cache_path_for_key(cache_key)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"digest": digest}, f)
