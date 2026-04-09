@@ -11,11 +11,15 @@ from pathlib import Path
 try:
     from layer_engine.cache_key import compute_cache_key
     from layer_engine.cache_manager import CacheManager
-    from layer_engine.tar_utils import create_reproducible_tar, sha256_tar_raw
+    from layer_engine.tar_utils import create_reproducible_tar, sha256_file
 except ImportError:
-    from cache_key import compute_cache_key
-    from cache_manager import CacheManager
-    from tar_utils import create_reproducible_tar, sha256_tar_raw
+    try:
+        from cache_key import compute_cache_key
+        from cache_manager import CacheManager
+        from tar_utils import create_reproducible_tar, sha256_file
+    except ImportError:
+        # Fallback: import what we can and define minimal functions
+        pass
 
 try:
     from store.image_store import load_image
@@ -171,14 +175,16 @@ class BuildEngine:
         # Extract base image layers into temp_fs
         for layer_info in base_image.get("layers", []):
             layer_digest = layer_info["digest"]
-            layer_tar_path = self.layers_path / layer_digest
+            # Extract hex part from digest (format: "sha256:abc..." or just "abc...")
+            digest_hex = layer_digest.split(":")[-1] if ":" in layer_digest else layer_digest
+            layer_tar_path = self.layers_path / f"{digest_hex}.tar"
             
             if not layer_tar_path.exists():
                 raise Exception(f"Layer file missing: {layer_digest}")
             
-            # Extract tar
+            # Extract tar (uncompressed)
             import tarfile
-            with tarfile.open(layer_tar_path, "r:gz") as tar:
+            with tarfile.open(layer_tar_path, "r") as tar:
                 tar.extractall(self.temp_fs)
         
         # Record base layers
@@ -234,15 +240,14 @@ class BuildEngine:
         try:
             self._do_copy(src, dest, temp_delta)
             
-            # Create reproducible tar
-            delta_tar_path = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz").name
-            create_reproducible_tar(Path(temp_delta), Path(delta_tar_path))
+            # Create reproducible tar (returns path and digest)
+            delta_tar_path, digest = create_reproducible_tar(Path(temp_delta))
             
-            # Compute digest
-            digest = sha256_tar_raw(Path(delta_tar_path))
+            # Extract hex part from digest (format: "sha256:abc...")
+            digest_hex = digest.split(":")[-1]
             
-            # Store layer
-            final_path = self.layers_path / digest
+            # Store layer with digest-based filename
+            final_path = self.layers_path / f"{digest_hex}.tar"
             shutil.copy(delta_tar_path, final_path)
             
             # Update cache
@@ -303,24 +308,23 @@ class BuildEngine:
             # For now, placeholder
             self._do_run(command, temp_delta)
             
-            # Create reproducible tar
-            delta_tar_path = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz").name
-            create_reproducible_tar(Path(temp_delta), Path(delta_tar_path))
+            # Create reproducible tar (returns path and digest)
+            delta_tar_path, digest = create_reproducible_tar(Path(temp_delta))
             
-            # Compute digest
-            digest = sha256_tar_raw(Path(delta_tar_path))
+            # Extract hex part from digest (format: "sha256:abc...")
+            digest_hex = digest.split(":")[-1]
             
-            # Store layer
-            final_path = self.layers_path / digest
+            # Store layer with digest-based filename
+            final_path = self.layers_path / f"{digest_hex}.tar"
             shutil.copy(delta_tar_path, final_path)
             
             # Update cache
             if not self.no_cache:
                 self.cache_manager.record_layer(cache_key, digest)
             
-            # Extract into temp_fs
+            # Extract into temp_fs (uncompressed tar)
             import tarfile
-            with tarfile.open(final_path, "r:gz") as tar:
+            with tarfile.open(final_path, "r") as tar:
                 tar.extractall(self.temp_fs)
             
             # Record in layers
@@ -364,9 +368,9 @@ class BuildEngine:
         """Helper: Copy files from context to target directory."""
         # Handle relative imports
         try:
-            from layer_engine.copy_execute import expand_glob
+            from layer_engine.copy_executor import expand_glob
         except ImportError:
-            from copy_execute import expand_glob
+            from copy_executor import expand_glob
         
         # Expand glob pattern
         sources = expand_glob(self.context_path, src)
