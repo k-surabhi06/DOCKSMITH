@@ -42,7 +42,7 @@ def handle_build(args):
     
     if len(args) < 3 or args[0] != "-t":
         print("Error: Usage → docksmith build -t <name:tag> <context> [--no-cache]")
-        return
+        sys.exit(1)
 
     name_tag = args[1]
     context = args[2]
@@ -55,7 +55,7 @@ def handle_build(args):
         # Parse name:tag
         if ":" not in name_tag:
             print("Error: Image name must be in format name:tag")
-            return
+            sys.exit(1)
         
         name, tag = name_tag.split(":", 1)
         
@@ -68,6 +68,7 @@ def handle_build(args):
 
     except Exception as e:
         print(f"Error: {e}")
+        sys.exit(1)
 
 
 def handle_images():

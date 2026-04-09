@@ -52,7 +52,9 @@ class CacheManager:
             return None
         
         digest = self.index[cache_key]
-        layer_path = os.path.join(layers_path, digest)
+        # Extract hex part from digest (format: "sha256:abc..." or just "abc...")
+        digest_hex = digest.split(":")[-1] if ":" in digest else digest
+        layer_path = os.path.join(layers_path, f"{digest_hex}.tar")
         
         # Cache hit only if both key matches and layer file exists
         if os.path.exists(layer_path):

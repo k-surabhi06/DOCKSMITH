@@ -225,9 +225,11 @@ class BuildEngine:
             cached_digest = self.cache_manager.get_cached_layer(cache_key, str(self.layers_path))
             if cached_digest:
                 # Cache hit: record layer and return
+                digest_hex = cached_digest.split(":")[-1] if ":" in cached_digest else cached_digest
+                layer_file_path = self.layers_path / f"{digest_hex}.tar"
                 self.layers.append({
                     "digest": cached_digest,
-                    "size": os.path.getsize(self.layers_path / cached_digest),
+                    "size": os.path.getsize(layer_file_path),
                     "createdBy": instruction.raw
                 })
                 return True, cached_digest
@@ -287,8 +289,9 @@ class BuildEngine:
             if cached_digest:
                 # Cache hit: extract layer into temp_fs and record
                 import tarfile
-                layer_tar = self.layers_path / cached_digest
-                with tarfile.open(layer_tar, "r:gz") as tar:
+                digest_hex = cached_digest.split(":")[-1] if ":" in cached_digest else cached_digest
+                layer_tar = self.layers_path / f"{digest_hex}.tar"
+                with tarfile.open(layer_tar, "r") as tar:
                     tar.extractall(self.temp_fs)
                 
                 self.layers.append({
