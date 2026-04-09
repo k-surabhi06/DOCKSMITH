@@ -362,8 +362,11 @@ class BuildEngine:
     
     def _execute_copy(self, src, dest, target_dir):
         """Helper: Copy files from context to target directory."""
-        import glob as glob_module
-        from copy_execute import expand_glob
+        # Handle relative imports
+        try:
+            from layer_engine.copy_execute import expand_glob
+        except ImportError:
+            from copy_execute import expand_glob
         
         # Expand glob pattern
         sources = expand_glob(self.context_path, src)
