@@ -1,0 +1,4 @@
+FROM alpine:latest
+COPY *.txt /app/
+COPY **/*.py /scripts/
+COPY subdir /data/subdir

@@ -20,8 +20,8 @@ def parse_file(path):
     try:
         with open(path, "r") as f:
             lines = f.readlines()
-    except:
-        raise Exception("Docksmithfile not found")
+    except Exception:
+        raise ParseError("Docksmithfile not found")
 
     for i, line in enumerate(lines, start=1):
         line = line.strip()
@@ -33,7 +33,7 @@ def parse_file(path):
         keyword = parts[0]
 
         if keyword not in VALID_INSTRUCTIONS:
-            raise Exception(f"line {i}: unsupported instruction {keyword}")
+            raise ParseError(f"line {i}: unsupported instruction {keyword}")
 
         args = parts[1] if len(parts) > 1 else ""
 
@@ -45,32 +45,32 @@ def validate_instruction(keyword, args, line, raw):
 
     if keyword == "FROM":
         if not args:
-            raise Exception(f"line {line}: FROM requires image")
+            raise ParseError(f"line {line}: FROM requires image")
         return Instruction("FROM", {"image": args}, line, raw)
 
 
     elif keyword == "COPY":
         parts = args.split()
         if len(parts) != 2:
-            raise Exception(f"line {line}: COPY requires src and dest")
+            raise ParseError(f"line {line}: COPY requires src and dest")
         return Instruction("COPY", {"src": parts[0], "dest": parts[1]}, line, raw)
 
 
     elif keyword == "RUN":
         if not args:
-            raise Exception(f"line {line}: RUN requires command")
+            raise ParseError(f"line {line}: RUN requires command")
         return Instruction("RUN", {"command": args}, line, raw)
 
 
     elif keyword == "WORKDIR":
         if not args:
-            raise Exception(f"line {line}: WORKDIR requires path")
+            raise ParseError(f"line {line}: WORKDIR requires path")
         return Instruction("WORKDIR", {"path": args}, line, raw)
 
 
     elif keyword == "ENV":
         if "=" not in args:
-            raise Exception(f"line {line}: ENV must be key=value")
+            raise ParseError(f"line {line}: ENV must be key=value")
         key, value = args.split("=", 1)
         return Instruction("ENV", {"key": key, "value": value}, line, raw)
 
@@ -80,14 +80,14 @@ def validate_instruction(keyword, args, line, raw):
             parsed = json.loads(args)
 
             if not isinstance(parsed, list):
-                raise Exception()
+                raise ParseError()
 
             # optional: check all elements are strings
             for item in parsed:
                 if not isinstance(item, str):
-                    raise Exception()
+                    raise ParseError()
 
-        except:
-            raise Exception(f"line {line}: CMD must be JSON array of strings")
+        except Exception:
+            raise ParseError(f"line {line}: CMD must be JSON array of strings")
 
         return Instruction("CMD", {"command": parsed}, line, raw)
