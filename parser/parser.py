@@ -1,5 +1,14 @@
 import json
-from models.instruction import Instruction
+import sys
+import os
+
+# Handle relative imports
+try:
+    from models.instruction import Instruction
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from models.instruction import Instruction
+
 class ParseError(Exception):
     pass
 

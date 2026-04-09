@@ -1,0 +1,7 @@
+FROM alpine:3.18
+WORKDIR /app
+COPY app.py /app/
+ENV APP_NAME=MyApp
+ENV MESSAGE=HelloFromDocksmith
+RUN apk add --no-cache python3
+CMD ["python3", "app.py"]
