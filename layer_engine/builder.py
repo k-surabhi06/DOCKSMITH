@@ -98,16 +98,21 @@ class BuildEngine:
                     step_num += 1
                     
                 elif instruction.type == "COPY":
+                    step_start = time.time()
                     cache_hit, layer_digest = self._execute_copy_with_cache(instruction)
+                    step_time = time.time() - step_start
                     cache_status = "[CACHE HIT]" if cache_hit else "[CACHE MISS]"
-                    header = f"Step {step_num}/{total_steps} : COPY {instruction.args['src']} {instruction.args['dest']} {cache_status}"
+                    header = f"Step {step_num}/{total_steps} : COPY {instruction.args['src']} {instruction.args['dest']} {cache_status} {step_time:.2f}s"
                     print(header)
                     step_num += 1
-                    
+
                 elif instruction.type == "RUN":
+                    step_start = time.time()
                     cache_hit, layer_digest = self._execute_run_with_cache(instruction)
+                    step_time = time.time() - step_start
                     cache_status = "[CACHE HIT]" if cache_hit else "[CACHE MISS]"
-                    header = f"Step {step_num}/{total_steps} : RUN {instruction.args['command'][:50]} {cache_status}"
+                    cmd_preview = instruction.args['command'][:50]
+                    header = f"Step {step_num}/{total_steps} : RUN {cmd_preview} {cache_status} {step_time:.2f}s"
                     print(header)
                     step_num += 1
                     
@@ -307,8 +312,7 @@ class BuildEngine:
         # Create delta for RUN execution
         temp_delta = tempfile.mkdtemp(prefix="delta_")
         try:
-            # TODO: Implement RUN execution with isolation
-            # For now, placeholder
+            # Execute RUN command in isolated rootfs
             self._do_run(command, temp_delta)
             
             # Create reproducible tar (returns path and digest)
@@ -390,9 +394,70 @@ class BuildEngine:
         self._execute_copy(src, dest, delta_dir)
     
     def _do_run(self, command, delta_dir):
-        """Execute RUN command (placeholder)."""
-        # TODO: Implement actual RUN execution with process isolation
-        pass
+        """
+        Execute RUN command inside isolated rootfs using the shared isolation primitive,
+        then capture only the filesystem delta (changed files) to create a layer.
+
+        This uses the EXACT same isolation primitive as `docksmith run`:
+        - layer_engine.runtime.run_in_rootfs()
+
+        Args:
+            command: Shell command string to execute
+            delta_dir: Temporary directory where we'll capture the delta
+
+        Raises:
+            Exception: If RUN command exits with non-zero code
+        """
+        # Import the shared isolation primitive and snapshot utilities
+        try:
+            from layer_engine.runtime import run_in_rootfs, snapshot_filesystem, collect_changed_paths
+        except ImportError:
+            from runtime import run_in_rootfs, snapshot_filesystem, collect_changed_paths
+
+        rootfs = Path(self.temp_fs)
+
+        # Snapshot filesystem BEFORE RUN execution
+        before_state = snapshot_filesystem(rootfs)
+
+        # Parse command - if it's a shell command, wrap in sh -c
+        if any(c in command for c in ['|', '&&', '||', ';', '>', '<', '$', '`']):
+            argv = ["/bin/sh", "-c", command]
+        else:
+            argv = command.split()
+
+        # Build environment from accumulated ENV state
+        # self.env is a dict of KEY=VALUE pairs built up during the Dockerfile
+        build_env = dict(self.env)
+
+        try:
+            # Run command in isolated rootfs using the shared primitive
+            # This is the SAME function used by `docksmith run`
+            exit_code = run_in_rootfs(
+                rootfs=rootfs,
+                argv=argv,
+                env=build_env,
+                workdir=self.workdir
+            )
+
+            if exit_code != 0:
+                raise Exception(f"RUN command exited with code {exit_code}")
+
+        except Exception as e:
+            raise Exception(f"RUN execution failed: {e}")
+
+        # Snapshot filesystem AFTER RUN execution
+        after_state = snapshot_filesystem(rootfs)
+
+        # Compute delta: files that were created or modified
+        changed_paths = collect_changed_paths(rootfs, before_state, after_state)
+
+        # Copy only changed files to delta_dir for layer creation
+        for changed_path in changed_paths:
+            rel_path = changed_path.relative_to(rootfs)
+            dst_path = Path(delta_dir) / rel_path
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            if changed_path.is_file():
+                shutil.copy2(changed_path, dst_path)
     
     def _get_previous_layer_digest(self):
         """Get digest of the most recent layer-producing instruction."""
