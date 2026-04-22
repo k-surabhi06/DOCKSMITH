@@ -1,16 +1,33 @@
 import os
 import sys
+from pathlib import Path
 
 # Handle relative imports
 try:
     from parser.parser import parse_file
-    from store.image_store import list_images, remove_image, save_image
+    from store.image_store import (
+        list_images,
+        remove_image,
+        save_image,
+        load_image,
+        layer_path_for_digest,
+    )
     from layer_engine.builder import BuildEngine
+    from layer_engine.runtime import materialize_rootfs, run_in_rootfs
+    from utils.errors import ImageNotFound, ValidationError
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from parser.parser import parse_file
-    from store.image_store import list_images, remove_image, save_image
+    from store.image_store import (
+        list_images,
+        remove_image,
+        save_image,
+        load_image,
+        layer_path_for_digest,
+    )
     from layer_engine.builder import BuildEngine
+    from layer_engine.runtime import materialize_rootfs, run_in_rootfs
+    from utils.errors import ImageNotFound, ValidationError
 
 import time
 
@@ -116,5 +133,56 @@ def handle_run(args):
             cmd = args[i:]
             break
     
-    print("Run not fully implemented yet")
-    # TODO: Implement container runtime
+    try:
+        # Load the image manifest
+        manifest = load_image(name_tag)
+        
+        # Extract layer digests
+        layer_digests = [layer.get("digest") for layer in manifest.get("layers", [])]
+        if not layer_digests:
+            print(f"Error: Image {name_tag} has no layers")
+            sys.exit(1)
+        
+        # Get layer file paths
+        layer_paths = [layer_path_for_digest(digest) for digest in layer_digests]
+        
+        # Materialize rootfs from layers
+        rootfs, cleanup = materialize_rootfs(layer_paths)
+        
+        try:
+            # Get CMD and WORKDIR from manifest
+            manifest_cmd = manifest.get("cmd", ["sh"])
+            workdir = manifest.get("workdir", "/")
+            
+            # Use provided cmd or manifest CMD
+            if cmd is None:
+                argv = manifest_cmd
+            else:
+                argv = cmd
+            
+            # Merge environment variables: manifest ENV + overrides
+            container_env = {}
+            for env_entry in manifest.get("env", []):
+                if "=" in env_entry:
+                    key, val = env_entry.split("=", 1)
+                    container_env[key] = val
+            
+            # Apply environment overrides
+            container_env.update(overrides)
+            
+            # Run the container
+            exit_code = run_in_rootfs(rootfs, argv, container_env, workdir)
+            sys.exit(exit_code)
+        
+        finally:
+            cleanup()
+    
+    except ImageNotFound as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    except ValidationError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)

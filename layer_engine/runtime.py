@@ -84,19 +84,28 @@ def run_in_rootfs(
     normalized_workdir = ensure_rootfs_workdir(rootfs, workdir)
 
     def preexec() -> None:
-        os.chroot(rootfs)
-        os.chdir(normalized_workdir)
+        try:
+            os.chroot(rootfs)
+            os.chdir(normalized_workdir)
+        except OSError as e:
+            if e.errno == 1:  # Operation not permitted
+                import sys
+                sys.stderr.write("\nError: chroot() requires root privileges.\n")
+                sys.stderr.write("Please run with sudo:\n")
+                sys.stderr.write("  sudo python3 main.py run <image> [cmd]\n")
+                sys.exit(1)
+            raise
 
     runtime_env = os.environ.copy()
     runtime_env.update(env)
 
     try:
         result = subprocess.run(argv, env=runtime_env, preexec_fn=preexec, check=False)
+        return result.returncode
     except PermissionError as exc:
         raise ValidationError(
-            "Linux isolation requires privileges to call chroot(). Run inside a Linux VM/WSL session with sufficient permissions."
+            "Linux isolation requires privileges to call chroot(). Run with sudo:\n"
+            "  sudo python3 main.py run <image> [cmd]"
         ) from exc
     except FileNotFoundError as exc:
         raise ValidationError(f"Command not found inside container rootfs: {argv[0]}") from exc
-
-    return result.returncode

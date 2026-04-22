@@ -6,10 +6,34 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict
+import pwd
 
 from utils.errors import ImageNotFound, ValidationError
 
-BASE_PATH = Path(os.environ.get("DOCKSMITH_HOME", os.path.expanduser("~/.docksmith")))
+
+def get_docksmith_home() -> Path:
+    """
+    Get DOCKSMITH home directory, handling sudo properly.
+    When using sudo, preserves the original user's home directory.
+    """
+    # Check if DOCKSMITH_HOME is explicitly set
+    if "DOCKSMITH_HOME" in os.environ:
+        return Path(os.environ["DOCKSMITH_HOME"])
+    
+    # When using sudo -E, SUDO_USER is set to the original user
+    if "SUDO_USER" in os.environ:
+        sudo_user = os.environ["SUDO_USER"]
+        try:
+            user_info = pwd.getpwnam(sudo_user)
+            return Path(user_info.pw_dir) / ".docksmith"
+        except KeyError:
+            pass
+    
+    # Default to user's home directory
+    return Path(os.path.expanduser("~/.docksmith"))
+
+
+BASE_PATH = get_docksmith_home()
 IMAGES_PATH = BASE_PATH / "images"
 LAYERS_PATH = BASE_PATH / "layers"
 CACHE_PATH = BASE_PATH / "cache"
